@@ -1529,7 +1529,6 @@ class DeepseekV2Model(nn.Module):
                 top_k = self.num_experts_per_tok
                 num_experts = self.n_routed_experts
                 num_shared_experts = self.n_shared_experts
-                num_shared_experts=0
                 fake_expertid = num_experts + num_shared_experts
                 # TODO need find a formal way
                 assert num_tokens <= (4096 * 128)
