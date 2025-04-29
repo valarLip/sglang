@@ -5,10 +5,10 @@ import pytest
 import torch
 from sgl_kernel import sgl_per_tensor_quant_fp8
 
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import is_fp8_fnuz
 
-_is_hip = is_hip()
-fp8_type_ = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+_is_fp8_fnuz = is_fp8_fnuz()
+fp8_type_ = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
 
 
 def sglang_scaled_fp8_quant(

@@ -16,9 +16,9 @@ from sglang.srt.layers.quantization.fp8_utils import (
     input_to_float8,
     normalize_e4m3fn_to_e4m3fnuz,
 )
-from sglang.srt.utils import is_hip, set_weight_attrs
+from sglang.srt.utils import set_weight_attrs, is_fp8_fnuz
 
-_is_hip = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 
 
 class W8A8Fp8Config(QuantizationConfig):
@@ -97,7 +97,7 @@ class W8A8Fp8LinearMethod(LinearMethodBase):
         if self.quantization_config.is_checkpoint_fp8_serialized:
             weight_scale = layer.weight_scale.detach()
             # If checkpoint offline quantized with w8a8_fp8, load the weight and weight_scale directly.
-            if _is_hip:
+            if _is_fp8_fnuz:
                 weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
                     weight=weight, weight_scale=weight_scale
                 )
@@ -113,14 +113,14 @@ class W8A8Fp8LinearMethod(LinearMethodBase):
                     layer.weight, layer.weight.shape[-1]
                 )
                 weight_scale = weight_scale.t().contiguous()
-                if _is_hip:
+                if _is_fp8_fnuz:
                     weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
                         weight=weight, weight_scale=weight_scale
                     )
             else:
                 # if cutlass not supported, we fall back to use torch._scaled_mm
                 # which requires per tensor quantization on weight
-                fp8_dtype = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+                fp8_dtype = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
                 qweight, weight_scale = input_to_float8(layer.weight, dtype=fp8_dtype)
 
             # Update the layer with the new values.
@@ -227,7 +227,7 @@ class W8A8FP8MoEMethod:
     ):
         from sglang.srt.layers.moe.fused_moe_triton import FusedMoeWeightScaleSupported
 
-        fp8_dtype = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+        fp8_dtype = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
         # WEIGHTS
         w13_weight = torch.nn.Parameter(
             torch.empty(

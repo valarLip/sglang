@@ -31,9 +31,10 @@ from sglang.srt.layers.quantization.fp8_kernel import (
     _w8a8_block_fp8_matmul_unrolledx4,
 )
 from sglang.srt.layers.quantization.int8_kernel import _w8a8_block_int8_matmul
-from sglang.srt.utils import get_device_core_count, get_device_name, is_hip
+from sglang.srt.utils import get_device_core_count, get_device_name, is_hip, is_fp8_fnuz
 
 is_hip_ = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 
 DTYPE_MAP = {
     "float32": torch.float32,
@@ -244,7 +245,7 @@ def tune(M, N, K, block_size, out_dtype, search_space, input_type):
 
     if input_type == "fp8":
         fp8_info = torch.finfo(
-            torch.float8_e4m3fnuz if is_hip_ else torch.float8_e4m3fn
+            torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
         )
         fp8_max, fp8_min = fp8_info.max, fp8_info.min
 
@@ -252,14 +253,14 @@ def tune(M, N, K, block_size, out_dtype, search_space, input_type):
             (torch.rand(M, K, dtype=torch.float32, device="cuda") - 0.5) * 2 * fp8_max
         )
         A = A_fp32.clamp(min=fp8_min, max=fp8_max).to(
-            torch.float8_e4m3fnuz if is_hip_ else torch.float8_e4m3fn
+            torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
         )
 
         B_fp32 = (
             (torch.rand(N, K, dtype=torch.float32, device="cuda") - 0.5) * 2 * fp8_max
         )
         B = B_fp32.clamp(min=fp8_min, max=fp8_max).to(
-            torch.float8_e4m3fnuz if is_hip_ else torch.float8_e4m3fn
+            torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
         )
     else:
         int8_info = torch.iinfo(torch.int8)

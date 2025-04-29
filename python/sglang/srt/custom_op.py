@@ -3,10 +3,11 @@ from typing import Optional
 import torch
 from torch import nn
 
-from sglang.srt.utils import is_cuda, is_hip
+from sglang.srt.utils import is_cuda, is_hip, is_fp8_fnuz
 
 _is_cuda = is_cuda()
 _is_hip = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 
 
 class CustomOp(nn.Module):
@@ -77,7 +78,7 @@ if _is_cuda:
         """
         assert input.ndim == 2, f"Expected 2D input tensor, got {input.ndim}D"
         shape = input.shape
-        out_dtype = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+        out_dtype = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
         if num_token_padding:
             shape = (max(num_token_padding, input.shape[0]), shape[1])
         output = torch.empty(shape, device=input.device, dtype=out_dtype)

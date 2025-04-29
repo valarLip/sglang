@@ -31,13 +31,15 @@ from sglang.srt.utils import (
     get_device_sm,
     is_cuda,
     is_hip,
+    is_fp8_fnuz,
     supports_custom_op,
 )
 
 _enable_jit_deepgemm = False
 
 _is_hip = is_hip()
-fp8_type_ = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+_is_fp8_fnuz = is_fp8_fnuz()
+fp8_type_ = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
 
 _is_cuda = is_cuda()
 if _is_cuda:
@@ -205,7 +207,7 @@ def per_token_group_quant_fp8(
     finfo = torch.finfo(dtype)
     fp8_max = finfo.max
 
-    if _is_hip:
+    if _is_fp8_fnuz:
         fp8_max = 224.0
 
     fp8_min = -fp8_max
@@ -389,7 +391,7 @@ def static_quant_fp8(
     finfo = torch.finfo(dtype)
     fp8_max = finfo.max
 
-    if _is_hip:
+    if _is_fp8_fnuz:
         fp8_max = 224.0
 
     fp8_min = -fp8_max
@@ -906,7 +908,7 @@ def per_tensor_quant_mla_fp8(
 
     finfo = torch.finfo(dtype)
     fp8_max = finfo.max
-    if _is_hip:
+    if _is_fp8_fnuz:
         dtype = torch.float8_e4m3fnuz
         fp8_max = 224.0
 

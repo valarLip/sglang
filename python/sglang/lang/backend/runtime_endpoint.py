@@ -36,9 +36,10 @@ class RuntimeEndpoint(BaseBackend):
         self.base_url = base_url
         self.api_key = api_key
         self.verify = verify
+        self.base_url = "http://localhost:8787"
 
         res = http_request(
-            self.base_url + "/get_model_info",
+                "http://localhost:8787" + "/get_model_info",
             api_key=self.api_key,
             verify=self.verify,
         )

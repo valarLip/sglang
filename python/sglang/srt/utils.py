@@ -89,8 +89,14 @@ def get_bool_env_var(name: str, default: str = "false") -> bool:
 def is_hip() -> bool:
     return torch.version.hip is not None
 
+def is_gfx94() -> bool:
+    return is_hip() and 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
 
-if is_hip():
+def is_fp8_fnuz() -> bool:
+    return is_gfx94()
+
+
+if is_fp8_fnuz():
     FP8_E4M3_MAX = HIP_FP8_E4M3_FNUZ_MAX
 else:
     FP8_E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max

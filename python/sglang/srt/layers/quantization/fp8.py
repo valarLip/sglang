@@ -61,6 +61,7 @@ from sglang.srt.utils import (
     get_bool_env_var,
     is_cuda,
     is_hip,
+    is_fp8_fnuz,
     permute_weight,
     print_warning_once,
     set_weight_attrs,
@@ -69,11 +70,16 @@ from sglang.srt.utils import (
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
 _is_hip = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 
 if _is_hip:
-    from aiter import ActivationType
-    from aiter.fused_moe_bf16_asm import asm_moe, ck_moe_2stages, ck_moe_2stages_win4
+    from aiter import ActivationType, QuantType
+    from aiter import biased_grouped_topk
+
+    # from aiter.fused_moe_bf16_asm import asm_moe, ck_moe_2stages, ck_moe_2stages_win4
+    from aiter.fused_moe import fused_moe
     from aiter.ops.shuffle import shuffle_weight
+CK_MOE = get_bool_env_var("CK_MOE") and _is_hip
 
 _is_cuda = is_cuda()
 
@@ -307,7 +313,7 @@ class Fp8LinearMethod(LinearMethodBase):
         # Block quant doesn't need to process weights after loading
         if self.block_quant:
             # If ROCm, normalize the weights and scales to e4m3fnuz
-            if _is_hip:
+            if _is_fp8_fnuz:
                 # activation_scheme: dynamic
                 weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
                     weight=layer.weight,
@@ -326,6 +332,11 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.weight_scale_inv = torch.nn.Parameter(
                     layer.weight_scale_inv.data, requires_grad=False
                 )
+            # if CK_MOE:
+            #     # Pre-shuffle weights
+            #     layer.weight.data = shuffle_weight(
+            #         layer.weight.contiguous(), (16, 16)
+            #     )
             return
         layer.weight = torch.nn.Parameter(layer.weight.data, requires_grad=False)
         # If checkpoint not serialized fp8, quantize the weights.
@@ -367,7 +378,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 weight = layer.weight
                 weight_scale = layer.weight_scale
                 # If ROCm, normalize the weights and scales to e4m3fnuz
-                if _is_hip:
+                if _is_fp8_fnuz:
                     weight, weight_scale, input_scale = normalize_e4m3fn_to_e4m3fnuz(
                         weight=weight,
                         weight_scale=weight_scale,
@@ -479,6 +490,7 @@ class Fp8MoEMethod:
         self,
         layer: Module,
         num_experts: int,
+        num_shared_experts: int,
         hidden_size: int,
         intermediate_size: int,
         params_dtype: torch.dtype,
@@ -486,6 +498,8 @@ class Fp8MoEMethod:
     ):
         from sglang.srt.layers.moe.fused_moe_triton import FusedMoeWeightScaleSupported
 
+        # if CK_MOE:
+        #     num_experts += num_shared_experts
         if self.quant_config.is_checkpoint_fp8_serialized:
             params_dtype = (
                 torch.uint32
@@ -656,7 +670,7 @@ class Fp8MoEMethod:
         # Block quant doesn't need to process weights after loading
         if self.block_quant:
             # If ROCm, normalize the weights and scales to e4m3fnuz
-            if _is_hip:
+            if _is_fp8_fnuz:
                 # activation_scheme: dynamic
                 w13_weight, w13_weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
                     weight=layer.w13_weight,
@@ -680,20 +694,20 @@ class Fp8MoEMethod:
                 )
                 layer.w2_input_scale = None
 
-                if get_bool_env_var("CK_MOE"):
-                    # Pre-shuffle weights
-                    layer.w13_weight.data = shuffle_weight(
-                        layer.w13_weight.contiguous(), (16, 16)
-                    )
-                    layer.w2_weight.data = shuffle_weight(
-                        layer.w2_weight.contiguous(), (16, 16)
-                    )
+            if CK_MOE:
+                # Pre-shuffle weights
+                layer.w13_weight.data = shuffle_weight(
+                    layer.w13_weight.contiguous(), (16, 16)
+                )
+                layer.w2_weight.data = shuffle_weight(
+                    layer.w2_weight.contiguous(), (16, 16)
+                )
             return
 
         # If checkpoint is fp16 or bfloat16, quantize in place.
         if not self.quant_config.is_checkpoint_fp8_serialized:
             # If ROCm, use float8_e4m3fnuz instead (MI300x HW)
-            fp8_dtype = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+            fp8_dtype = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
             w13_weight = torch.empty_like(layer.w13_weight.data, dtype=fp8_dtype)
             w2_weight = torch.empty_like(layer.w2_weight.data, dtype=fp8_dtype)
 
@@ -755,7 +769,7 @@ class Fp8MoEMethod:
                 )
 
             # If ROCm, normalize the weights and scales to e4m3fnuz
-            if _is_hip:
+            if _is_fp8_fnuz:
                 # Normalize the weights and scales
                 w13_weight, w13_weight_scale, w13_input_scale = (
                     normalize_e4m3fn_to_e4m3fnuz(
@@ -918,17 +932,32 @@ class Fp8MoEMethod:
         from sglang.srt.layers.moe.topk import select_experts
 
         # Expert selection
-        topk_weights, topk_ids = select_experts(
-            hidden_states=x,
-            router_logits=router_logits,
-            use_grouped_topk=use_grouped_topk,
-            top_k=top_k,
-            renormalize=renormalize,
-            topk_group=topk_group,
-            num_expert_group=num_expert_group,
-            custom_routing_function=custom_routing_function,
-            correction_bias=correction_bias,
-        )
+        if CK_MOE and correction_bias is not None:
+            token = x.shape[0]
+            biased_grouped_topk(
+                router_logits,
+                correction_bias,
+                layer.ns_topk_weights[:token],
+                layer.ns_topk_ids[:token],
+                num_expert_group,
+                topk_group,
+                renormalize,
+                layer.routed_scaling_factor,
+            )
+            topk_ids = layer.total_topk_ids[:token]
+            topk_weights = layer.total_topk_weights[:token]
+        else:
+            topk_weights, topk_ids = select_experts(
+                hidden_states=x,
+                router_logits=router_logits,
+                use_grouped_topk=use_grouped_topk,
+                top_k=top_k,
+                renormalize=renormalize,
+                topk_group=topk_group,
+                num_expert_group=num_expert_group,
+                custom_routing_function=custom_routing_function,
+                correction_bias=correction_bias,
+            )
 
         if _is_hip and get_bool_env_var("USE_INT4_WEIGHT"):
             # TODO: add triton kernel and add check get_bool_env_var("CK_MOE")
@@ -945,22 +974,27 @@ class Fp8MoEMethod:
                     ActivationType.Silu if activation == "silu" else ActivationType.Gelu
                 ),
             )
-        if _is_hip and get_bool_env_var("CK_MOE"):
+        if CK_MOE:
             assert not no_combine, f"{no_combine=} is not supported."
             if self.block_quant:
                 # TODO(CK_MOE): FP8 block_quant only supports 'silu' for the time-being.
                 assert (
                     activation == "silu"
                 ), f"CK_MOE: FP8 bloack_quant {activation=} will be supported later, unset CK_MOE"
-                return asm_moe(
+                return fused_moe(
                     x,
                     layer.w13_weight,
                     layer.w2_weight,
                     topk_weights,
                     topk_ids,
-                    layer.w13_weight_scale_inv,
-                    layer.w2_weight_scale_inv,
-                    block_shape=tuple(self.quant_config.weight_block_size),
+                    w1_scale=layer.w13_weight_scale_inv,
+                    w2_scale=layer.w2_weight_scale_inv,
+                    quant_type=QuantType.per_128x128,
+                    activation=(
+                        ActivationType.Silu
+                        if activation == "silu"
+                        else ActivationType.Gelu
+                    ),
                     expert_mask=None,
                 )
             else:

@@ -23,13 +23,14 @@ import triton.language as tl
 from sglang.srt.layers.attention.triton_ops.prefill_attention import (
     context_attention_fwd,
 )
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import is_hip, is_gfx94
 
 is_cuda_available = torch.cuda.is_available()
 if is_cuda_available:
     CUDA_CAPABILITY = torch.cuda.get_device_capability()
 
 _is_hip = is_hip()
+_is_gfx94 = is_gfx94()
 
 
 @triton.jit
@@ -374,7 +375,7 @@ def extend_attention_fwd(
 
     extra_kargs = {}
     if _is_hip:
-        extra_kargs = {"waves_per_eu": 1, "matrix_instr_nonkdim": 16, "kpack": 2}
+        extra_kargs = {"waves_per_eu": 1, "matrix_instr_nonkdim": 16, "kpack": 2 if _is_gfx94 else 1}
 
     _fwd_kernel[grid](
         q_extend,

@@ -15,6 +15,7 @@ from sglang.srt.utils import (
     get_device_capability,
     is_cuda,
     is_hip,
+    is_fp8_fnuz,
 )
 
 try:
@@ -28,7 +29,9 @@ except ImportError:
 use_vllm_cutlass_w8a8_fp8_kernel = get_bool_env_var("USE_VLLM_CUTLASS_W8A8_FP8_KERNEL")
 
 _is_hip = is_hip()
-if _is_hip and get_bool_env_var("CK_MOE"):
+_is_fp8_fnuz = is_fp8_fnuz()
+AITER_GEMM = _is_hip and get_bool_env_var("AITER_GEMM")
+if AITER_GEMM:
     from aiter import gemm_a8w8_blockscale
 
 _is_cuda = is_cuda()
@@ -131,11 +134,11 @@ def apply_w8a8_block_fp8_linear(
         output = fp8_blockwise_scaled_mm(
             q_input, weight.T, x_scale, weight_scale.T, out_dtype=input.dtype
         )
-    elif _is_hip and get_bool_env_var("CK_MOE"):
+    elif AITER_GEMM:
         q_input, x_scale = per_token_group_quant_fp8(
             input_2d, block_size[1], column_major_scales=False
         )
-        output = torch.zeros(
+        output = torch.empty(
             [q_input.shape[0], weight.shape[0]],
             dtype=input.dtype,
             device=q_input.device,
@@ -170,7 +173,7 @@ def input_to_float8(
     min_val, max_val = x.aminmax()
     amax = torch.maximum(min_val.abs(), max_val.abs()).float().clamp(min=1e-12)
     fp8_max = finfo.max
-    if _is_hip:
+    if _is_fp8_fnuz:
         dtype = torch.float8_e4m3fnuz
         fp8_max = 224.0
     scale = fp8_max / amax

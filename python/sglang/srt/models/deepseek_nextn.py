@@ -40,9 +40,9 @@ from sglang.srt.managers.schedule_batch import global_server_args_dict
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.models.deepseek_v2 import DeepseekV2DecoderLayer, DeepseekV3ForCausalLM
-from sglang.srt.utils import add_prefix, is_cuda, is_hip
+from sglang.srt.utils import add_prefix, is_cuda, is_fp8_fnuz
 
-_is_hip = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 _is_cuda = is_cuda()
 
 if _is_cuda:
@@ -292,7 +292,7 @@ class DeepseekV3ForCausalLMNextN(DeepseekV3ForCausalLM):
                 weight_block_size = self.quant_config.weight_block_size
                 if weight_block_size is not None:
                     assert hasattr(self_attn.kv_b_proj, "weight_scale_inv")
-                    if _is_hip:
+                    if _is_fp8_fnuz:
                         weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
                             weight=w,
                             weight_scale=self_attn.kv_b_proj.weight_scale_inv,
@@ -333,7 +333,7 @@ class DeepseekV3ForCausalLMNextN(DeepseekV3ForCausalLM):
                 and self_attn.w_scale is None
             ):
                 self_attn.w_scale = self_attn.kv_b_proj.weight_scale
-                if _is_hip:
+                if _is_fp8_fnuz:
                     self_attn.w_scale *= 2.0
 
 

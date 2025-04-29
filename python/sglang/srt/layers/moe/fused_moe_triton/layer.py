@@ -18,7 +18,13 @@ from sglang.srt.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
 )
-from sglang.srt.utils import get_bool_env_var, is_hip, permute_weight, set_weight_attrs
+from sglang.srt.utils import (
+    get_bool_env_var,
+    is_hip,
+    is_fp8_fnuz,
+    permute_weight,
+    set_weight_attrs,
+)
 
 if torch.cuda.is_available():
     from sglang.srt.layers.moe.fused_moe_triton.fused_moe import fused_experts
@@ -28,8 +34,9 @@ else:
 import logging
 
 _is_hip = is_hip()
-
-if _is_hip:
+_is_fp8_fnuz = is_fp8_fnuz()
+CK_MOE = get_bool_env_var("CK_MOE") and _is_hip
+if CK_MOE:
     from aiter import ck_moe
 
 logger = logging.getLogger(__name__)
@@ -273,6 +280,7 @@ class FusedMoE(torch.nn.Module):
         renormalize: bool = True,
         use_grouped_topk: bool = False,
         num_expert_group: Optional[int] = None,
+        num_shared_experts: Optional[int] = None,
         topk_group: Optional[int] = None,
         quant_config: Optional[QuantizationConfig] = None,
         tp_size: Optional[int] = None,
@@ -295,6 +303,7 @@ class FusedMoE(torch.nn.Module):
         )
         self.top_k = top_k
         self.num_experts = num_experts
+        self.num_shared_experts = num_shared_experts
         assert intermediate_size % self.tp_size == 0
         self.intermediate_size_per_partition = intermediate_size // self.tp_size
         self.reduce_results = reduce_results
@@ -324,6 +333,7 @@ class FusedMoE(torch.nn.Module):
         self.quant_method.create_weights(
             layer=self,
             num_experts=num_experts,
+            num_shared_experts=num_shared_experts,
             hidden_size=hidden_size,
             # FIXME: figure out which intermediate_size to use
             intermediate_size=self.intermediate_size_per_partition,
@@ -521,7 +531,7 @@ class FusedMoE(torch.nn.Module):
         # Case input scale: input_scale loading is only supported for fp8
         if "input_scale" in weight_name:
             # INT4-FP8 (INT4 MoE Weight, FP8 Compute): Adjust input_scale for e4m3fnuz (AMD)
-            if _is_hip and get_bool_env_var("USE_INT4_WEIGHT"):
+            if _is_fp8_fnuz and get_bool_env_var("USE_INT4_WEIGHT"):
                 loaded_weight = loaded_weight * 2.0
 
             # this is needed for compressed-tensors only
@@ -563,7 +573,7 @@ class FusedMoE(torch.nn.Module):
             quant_method = getattr(param, "quant_method", None)
             if quant_method == FusedMoeWeightScaleSupported.CHANNEL.value:
                 # INT4-FP8 (INT4 MoE Weight, FP8 Compute): Adjust INT4 column-wise scaling number to e4m3fnuz (AMD)
-                if _is_hip and get_bool_env_var("USE_INT4_WEIGHT"):
+                if _is_fp8_fnuz and get_bool_env_var("USE_INT4_WEIGHT"):
                     loaded_weight = loaded_weight * 0.5
 
                 self._load_per_channel_weight_scale(
@@ -586,7 +596,7 @@ class FusedMoE(torch.nn.Module):
                 )
             elif quant_method == FusedMoeWeightScaleSupported.TENSOR.value:
                 # INT4-FP8 (INT4 MoE Weight, FP8 Compute): Adjust FP8 per-tensor scaling number for e4m3fnuz (AMD)
-                if _is_hip and get_bool_env_var("USE_INT4_WEIGHT"):
+                if _is_fp8_fnuz and get_bool_env_var("USE_INT4_WEIGHT"):
                     loaded_weight = loaded_weight * 2.0
 
                 self._load_per_tensor_weight_scale(
@@ -651,6 +661,7 @@ class FusedMoE(torch.nn.Module):
         ckpt_down_proj_name: str,
         ckpt_up_proj_name: str,
         num_experts: int,
+        num_shared_experts:int,
     ) -> List[Tuple[str, str, int, str]]:
 
         return [

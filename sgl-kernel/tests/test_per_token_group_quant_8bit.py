@@ -7,10 +7,10 @@ import triton
 import triton.language as tl
 from sgl_kernel import sgl_per_token_group_quant_fp8, sgl_per_token_group_quant_int8
 
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import is_fp8_fnuz
 
-_is_hip = is_hip()
-fp8_type_ = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+_is_fp8_fnuz = is_fp8_fnuz()
+fp8_type_ = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
 
 
 @triton.jit
@@ -138,7 +138,7 @@ def triton_per_token_group_quant_8bit(
 
     fp8_max = finfo.max
 
-    if _is_hip:
+    if _is_fp8_fnuz:
         if dtype == torch.int8:
             fp8_max = 127.0
         else:

@@ -14,6 +14,9 @@ from sglang.srt.layers.moe.fused_moe_triton.fused_moe import (
     fused_moe,
     get_config_file_name,
 )
+from sglang.srt.utils import is_fp8_fnuz
+
+_is_fp8_fnuz = is_fp8_fnuz()
 
 padding_size = 128 if bool(int(os.getenv("MOE_PADDING", "0"))) else 0
 
@@ -306,8 +309,8 @@ def run_timing(
     a2_scale = None
 
     if dtype == "float8":
-        w1 = w1.to(torch.float8_e4m3fnuz)
-        w2 = w2.to(torch.float8_e4m3fnuz)
+        w1 = w1.to(torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn)
+        w2 = w2.to(torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn)
         w1_scale = torch.ones(
             num_total_experts, device=hidden_states.device, dtype=torch.float32
         )

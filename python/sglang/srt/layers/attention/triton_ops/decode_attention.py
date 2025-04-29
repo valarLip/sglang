@@ -25,10 +25,14 @@ import logging
 import triton
 import triton.language as tl
 
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import is_hip, is_gfx94, get_bool_env_var
+from sglang.srt.distributed import get_tensor_model_parallel_rank
 
 _is_hip = is_hip()
-
+_is_gfx94 = is_gfx94()
+AITER_MLA_DECODE = _is_hip and get_bool_env_var("AITER_MLA_DECODE")
+if AITER_MLA_DECODE:
+    from aiter.mla import mla_decode_fwd
 logger = logging.getLogger(__name__)
 
 # TODO: Remove this when triton>=3.2.0. This issue will not affect performance and accuracy.
@@ -454,7 +458,11 @@ def _decode_grouped_att_m_fwd(
     if _is_hip:
         # https://rocm.docs.amd.com/en/docs-6.2.0/how-to/llm-fine-tuning-optimization/optimizing-triton-kernel.html
         # https://github.com/triton-lang/triton/blob/main/third_party/amd/backend/compiler.py
-        extra_kargs = {"waves_per_eu": 1, "matrix_instr_nonkdim": 16, "kpack": 2}
+        extra_kargs = {
+            "waves_per_eu": 1,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 2 if _is_gfx94 else 1,
+        }
         num_stages = 1
 
     _fwd_grouped_kernel_stage1[grid](
@@ -577,7 +585,11 @@ def _decode_softmax_reducev_fwd(
     if _is_hip:
         # https://rocm.docs.amd.com/en/docs-6.2.0/how-to/llm-fine-tuning-optimization/optimizing-triton-kernel.html
         # https://github.com/triton-lang/triton/blob/main/third_party/amd/backend/compiler.py
-        extra_kargs = {"waves_per_eu": 4, "matrix_instr_nonkdim": 16, "kpack": 2}
+        extra_kargs = {
+            "waves_per_eu": 4,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 2 if _is_gfx94 else 1,
+        }
 
     grid = (batch, head_num)
     _fwd_kernel_stage2[grid](
@@ -684,10 +696,13 @@ def decode_attention_fwd(
     k_buffer,
     v_buffer,
     o,
+    qo_indptr,
     kv_indptr,
     kv_indices,
     attn_logits,
     attn_lse,
+    kv_last_page_len,
+    max_extend_len,
     num_kv_splits,
     max_kv_splits,
     sm_scale,
@@ -715,6 +730,21 @@ def decode_attention_fwd(
             sm_scale,
             logit_cap,
         )
+    elif AITER_MLA_DECODE:
+        # ROCM MLA
+        mla_decode_fwd(
+            q,
+            k_buffer.view(-1, 1, 1, q.shape[-1]),
+            o,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_len,
+            max_extend_len,
+            sm_scale,
+            logit_cap,
+        )
+        k_buffer = k_buffer.view(-1, 1, q.shape[-1])
     else:
         # GQA/MQA/MLA
         decode_attention_fwd_grouped(

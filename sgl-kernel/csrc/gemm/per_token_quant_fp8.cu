@@ -62,7 +62,7 @@ __global__ void per_token_quant_fp8_kernel(
 #pragma unroll
     for (uint32_t j = 0; j < VEC_SIZE; ++j) {
       float val = fmaxf(fminf(static_cast<float>(input_vec[j]) * scale_inv, FP8_E4M3_MAX), -FP8_E4M3_MAX);
-#ifndef USE_ROCM
+#if !USE_FNUZ
       output_arr[j] = static_cast<FP8_TYPE>(val);
 #else
       output_arr[j] = c10::Float8_e4m3fnuz(

@@ -18,9 +18,10 @@ from sglang.srt.layers.moe.fused_moe_triton.fused_moe import (
     get_default_config,
     get_moe_configs,
 )
-from sglang.srt.utils import is_hip
+from sglang.srt.utils import is_hip, is_fp8_fnuz
 
 _is_hip_ = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 
 
 class BenchmarkConfig(TypedDict):
@@ -112,8 +113,8 @@ def benchmark_config(
             )
 
     if use_fp8_w8a8:
-        w1 = w1.to(torch.float8_e4m3fnuz if _is_hip_ else torch.float8_e4m3fn)
-        w2 = w2.to(torch.float8_e4m3fnuz if _is_hip_ else torch.float8_e4m3fn)
+        w1 = w1.to(torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn)
+        w2 = w2.to(torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn)
 
     input_gating = torch.empty(num_tokens, num_experts, dtype=torch.float32)
 

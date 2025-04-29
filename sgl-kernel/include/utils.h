@@ -16,10 +16,15 @@ limitations under the License.
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <cuda_runtime.h>
 #include <torch/all.h>
 
 #include <sstream>
+
+#define USE_FNUZ() ({ \
+      bool ret; ret = at::detail::getCUDAHooks().isGPUArch({"gfx94"}); ret; \
+      })
 
 #ifndef USE_ROCM
 // Adapt from FlashInfer
@@ -282,7 +287,7 @@ inline int getSMVersion() {
 #define CEILDIV(x, y) (((x) + (y) - 1) / (y))
 #define WARP_SIZE 32
 
-#ifndef USE_ROCM
+#if !(USE_FNUZ)
 #include <c10/util/Float8_e4m3fn.h>
 using FP8_TYPE = c10::Float8_e4m3fn;
 C10_HOST_DEVICE constexpr auto FP8_E4M3_MAX = std::numeric_limits<FP8_TYPE>::max();

@@ -55,7 +55,7 @@ hipcc_flags = [
     "-fPIC",
     "-std=c++17",
     "-D__HIP_PLATFORM_AMD__=1",
-    "--amdgpu-target=gfx942",
+    "--amdgpu-target=gfx950",
     "-DENABLE_BF16",
     "-DENABLE_FP8",
 ]

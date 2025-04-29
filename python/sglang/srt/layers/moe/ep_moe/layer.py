@@ -38,7 +38,7 @@ from sglang.srt.layers.quantization.base_config import (
 )
 from sglang.srt.layers.quantization.fp8 import Fp8Config, Fp8MoEMethod
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
-from sglang.srt.utils import DeepEPMode, is_cuda, is_hip, set_weight_attrs
+from sglang.srt.utils import DeepEPMode, is_cuda, is_fp8_fnuz, set_weight_attrs
 
 _is_cuda = is_cuda()
 
@@ -49,7 +49,7 @@ else:
 
 logger = logging.getLogger(__name__)
 
-_is_hip = is_hip()
+_is_fp8_fnuz = is_fp8_fnuz()
 
 _buffer = None
 
@@ -726,7 +726,7 @@ class Fp8EPMoEMethod(Fp8MoEMethod):
         # If checkpoint is fp16, quantize in place.
         if not self.quant_config.is_checkpoint_fp8_serialized:
             # If rocm, use float8_e4m3fnuz as dtype
-            fp8_dtype = torch.float8_e4m3fnuz if _is_hip else torch.float8_e4m3fn
+            fp8_dtype = torch.float8_e4m3fnuz if _is_fp8_fnuz else torch.float8_e4m3fn
             w13_weight = torch.empty_like(layer.w13_weight.data, dtype=fp8_dtype)
             w2_weight = torch.empty_like(layer.w2_weight.data, dtype=fp8_dtype)
 
